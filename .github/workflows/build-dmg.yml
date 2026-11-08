@@ -31,6 +31,16 @@ jobs:
           echo "Using $XCODE"
           sudo xcode-select -s "$XCODE/Contents/Developer"
 
+      - name: Relax the type-checker time limit on slow runners
+        run: |
+          # build.command calls `swiftc` by name; this wrapper only adds a
+          # longer expression type-check budget (shared CI CPUs are slow).
+          mkdir -p "$RUNNER_TEMP/bin"
+          REAL=$(xcrun -f swiftc)
+          printf '#!/bin/sh\nexec "%s" -Xfrontend -solver-expression-time-threshold=600 "$@"\n' "$REAL" > "$RUNNER_TEMP/bin/swiftc"
+          chmod +x "$RUNNER_TEMP/bin/swiftc"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+
       - name: Read app version
         id: version
         run: |
