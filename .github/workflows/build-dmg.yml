@@ -1,0 +1,97 @@
+name: Build macOS DMG
+
+# Builds VoxAster.app on an Apple Silicon runner with the repo's own
+# build.command, packs it into a DMG and attaches it to a GitHub release.
+#
+# Run it by hand (Actions → Build macOS DMG → Run workflow) or push a tag
+# like "v3.8.2".
+#
+# The app is ad-hoc signed, not notarized. On first launch macOS will block it;
+# see the release notes for how to open it.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  dmg:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: |
+          VERSION=$(python3 -c "import json;print(json.load(open('Backend/runtime.json'))['native_app_version'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build VoxAster.app
+        env:
+          # build.command only needs a Python with the standard library.
+          OMNIVOICE_PYTHON: python3
+        run: |
+          swift --version
+          chmod +x build.command
+          ./build.command "$RUNNER_TEMP/build"
+          codesign --verify --deep --strict "$RUNNER_TEMP/build/VoxAster.app"
+          file "$RUNNER_TEMP/build/VoxAster.app/Contents/MacOS/VoxAster"
+
+      - name: Create DMG
+        id: dmg
+        run: |
+          DMG="VoxAster-${{ steps.version.outputs.version }}-arm64.dmg"
+          STAGE="$RUNNER_TEMP/dmg"
+          mkdir -p "$STAGE"
+          ditto "$RUNNER_TEMP/build/VoxAster.app" "$STAGE/VoxAster.app"
+          ln -s /Applications "$STAGE/Applications"
+          hdiutil create -volname "VoxAster" -srcfolder "$STAGE" \
+            -fs HFS+ -format UDZO -ov "$DMG"
+          hdiutil verify "$DMG"
+          shasum -a 256 "$DMG" > "$DMG.sha256"
+          echo "file=$DMG" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VoxAster-dmg
+          path: |
+            ${{ steps.dmg.outputs.file }}
+            ${{ steps.dmg.outputs.file }}.sha256
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          DMG: ${{ steps.dmg.outputs.file }}
+        run: |
+          cat > notes.md <<'EOF'
+          VoxAster built from this fork for Apple Silicon Macs (macOS 14 or later).
+
+          **Install:** open the DMG and drag VoxAster into Applications.
+
+          **First launch:** the app is ad-hoc signed, not notarized, so macOS blocks it.
+          Either right-click VoxAster → Open → Open, or run once in Terminal:
+
+              xattr -dr com.apple.quarantine /Applications/VoxAster.app
+
+          **Runtime and models:** on first launch VoxAster offers *Set up VoxAster*,
+          which downloads the pinned Python runtime and models (about 3.3 GB download,
+          about 11 GB free space needed during setup). Model licences (incl. CC-BY-NC)
+          are shown before setup starts.
+          EOF
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$DMG" "$DMG.sha256" --clobber
+          else
+            gh release create "$TAG" "$DMG" "$DMG.sha256" \
+              --title "VoxAster ${TAG#v} (macOS DMG)" --notes-file notes.md \
+              --target "$GITHUB_SHA"
+          fi
