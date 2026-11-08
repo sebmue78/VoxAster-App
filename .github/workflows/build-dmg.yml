@@ -37,7 +37,9 @@ jobs:
           # longer expression type-check budget (shared CI CPUs are slow).
           mkdir -p "$RUNNER_TEMP/bin"
           REAL=$(xcrun -f swiftc)
-          printf '#!/bin/sh\nexec "%s" -Xfrontend -solver-expression-time-threshold=600 "$@"\n' "$REAL" > "$RUNNER_TEMP/bin/swiftc"
+          SDK=$(xcrun --sdk macosx --show-sdk-path)
+          printf '#!/bin/sh\nexec "%s" -sdk "%s" -Xfrontend -solver-expression-time-threshold=600 "$@"\n' "$REAL" "$SDK" > "$RUNNER_TEMP/bin/swiftc"
+          cat "$RUNNER_TEMP/bin/swiftc"
           chmod +x "$RUNNER_TEMP/bin/swiftc"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
 
