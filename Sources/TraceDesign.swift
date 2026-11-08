@@ -488,31 +488,46 @@ struct Stylus: View {
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
+            let t: Double = context.date.timeIntervalSinceReferenceDate
             Canvas { ctx, size in
-                let mid = size.height / 2
-                let w = size.width
-                ctx.fill(Path(CGRect(x: 0, y: mid, width: w, height: 0.5)), with: .color(Trace.rule))
-                let head: CGFloat
-                if let progress { head = w * CGFloat(max(0.02, min(1, progress))) }
-                else { head = reduceMotion ? w * 0.5 : w * CGFloat((t * 0.12).truncatingRemainder(dividingBy: 1)) }
-                var line = Path()
-                let start = progress == nil ? max(0, head - w * 0.35) : 0
-                var x = start
-                line.move(to: CGPoint(x: x, y: mid))
-                while x < head {
-                    let env = sin(x * 0.045 + 1.3) * 0.5 + 0.5
-                    let y = mid - CGFloat(sin(x * 0.9 + t * 3) * cos(x * 0.21)) * mid * 0.7 * env
-                    line.addLine(to: CGPoint(x: x, y: y)); x += 1.5
-                }
-                ctx.stroke(line, with: .color(Trace.ink), lineWidth: 1.1)
-                ctx.fill(Path(ellipseIn: CGRect(x: head - 3, y: mid - 3, width: 6, height: 6)), with: .color(Trace.record))
+                Self.draw(in: &ctx, size: size, t: t, progress: progress, reduceMotion: reduceMotion)
             }
         }
         .overlay(alignment: .topLeading) {
             Text(label).font(.traceValue).foregroundStyle(Trace.graphite).padding(.top, 2)
         }
         .accessibilityElement().accessibilityLabel(label)
+    }
+
+    // Split out of `body` with explicit types so the type checker stays fast.
+    private static func draw(in ctx: inout GraphicsContext, size: CGSize, t: Double,
+                             progress: Double?, reduceMotion: Bool) {
+        let mid: CGFloat = size.height / 2
+        let w: CGFloat = size.width
+        ctx.fill(Path(CGRect(x: 0, y: mid, width: w, height: 0.5)), with: .color(Trace.rule))
+        let head: CGFloat
+        if let progress {
+            head = w * CGFloat(max(0.02, min(1.0, progress)))
+        } else if reduceMotion {
+            head = w * 0.5
+        } else {
+            let phase: Double = (t * 0.12).truncatingRemainder(dividingBy: 1)
+            head = w * CGFloat(phase)
+        }
+        var line = Path()
+        let start: CGFloat = progress == nil ? max(0, head - w * 0.35) : 0
+        var x: CGFloat = start
+        line.move(to: CGPoint(x: x, y: mid))
+        while x < head {
+            let xd = Double(x)
+            let env: Double = sin(xd * 0.045 + 1.3) * 0.5 + 0.5
+            let wave: Double = sin(xd * 0.9 + t * 3) * cos(xd * 0.21)
+            let y: CGFloat = mid - CGFloat(wave * 0.7 * env) * mid
+            line.addLine(to: CGPoint(x: x, y: y))
+            x += 1.5
+        }
+        ctx.stroke(line, with: .color(Trace.ink), lineWidth: 1.1)
+        ctx.fill(Path(ellipseIn: CGRect(x: head - 3, y: mid - 3, width: 6, height: 6)), with: .color(Trace.record))
     }
 }
 
